@@ -1,0 +1,21 @@
+# Environnements virtuels Python
+.venv/
+venv/
+ENV/
+env/
+
+# Caches Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pytest_cache/
+
+# Fichiers temporaires et uploads
+data/temp_uploaded.xlsx
+data/exports/test_*
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

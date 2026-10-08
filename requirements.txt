@@ -1,0 +1,15 @@
+# Core data and Excel processing
+openpyxl>=3.1.2
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Web application & visual charts
+streamlit>=1.36.0
+plotly>=5.22.0
+
+# PDF Report Generation
+reportlab>=4.2.0
+
+# Optional LLM integration (fallback to built-in expert engine)
+pydantic>=2.7.0
+python-dateutil>=2.9.0
