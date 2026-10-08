@@ -225,6 +225,8 @@ def chat_api(req: ChatRequest):
     diagnosis = state["diagnosis"]
 
     reponse = orchestrator.answer_question(req.question, kpi, diagnosis)
+    if not isinstance(reponse, str) or not reponse.strip():
+        reponse = "Le copilote n'a pas pu produire de réponse. Vérifiez les données du classeur et réessayez."
     return {"question": req.question, "reponse": reponse}
 
 
@@ -784,10 +786,18 @@ def index_html():
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ question: q, filepath: currentData.filepath }})
                 }});
-                const data = await res.json();
+                const body = await res.text();
+                let data = {{}};
+                try {{ data = body ? JSON.parse(body) : {{}}; }} catch {{ data = {{ detail: body }}; }}
+                if (!res.ok) {{
+                    throw new Error(data.detail || `Erreur API (${{res.status}})`);
+                }}
+                if (typeof data.reponse !== 'string' || !data.reponse.trim()) {{
+                    throw new Error('L’API a répondu sans fournir de texte. Vérifiez les journaux du serveur.');
+                }}
                 resArea.innerText = data.reponse;
             }} catch (err) {{
-                resArea.innerText = "Erreur lors de la communication : " + err;
+                resArea.innerText = "Erreur du copilote : " + (err && err.message ? err.message : String(err));
             }} finally {{
                 btn.disabled = false;
                 btn.innerText = 'Envoyer';
