@@ -10,6 +10,7 @@ import os
 import json
 import uuid
 import re
+from urllib.parse import parse_qsl, urlencode
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
@@ -35,16 +36,36 @@ from reports.excel_exporter import ExcelExporter
 app = FastAPI(title="Copilote IA Chantier BTP", version="1.0.0")
 
 
+def _restore_vercel_route(scope: dict) -> None:
+    """Restaure le chemin public transmis comme query par la réécriture Vercel."""
+    current_path = scope.get("path", "")
+    if current_path not in ("/api/index", "/api/index/"):
+        return
+
+    raw_query = scope.get("query_string", b"").decode("latin-1")
+    pairs = parse_qsl(raw_query, keep_blank_values=True)
+    original_path = next((value for key, value in pairs if key == "__original_path"), None)
+    if not original_path:
+        return
+
+    if not original_path.startswith("/") or "\\" in original_path or "\x00" in original_path:
+        return
+
+    scope["path"] = original_path
+    scope["raw_path"] = original_path.encode("utf-8")
+    scope["query_string"] = urlencode(
+        [(key, value) for key, value in pairs if key != "__original_path"],
+        doseq=True
+    ).encode("ascii")
+
+
 @app.middleware("http")
 async def vercel_routing_middleware(request: Request, call_next):
     """
-    Intercepte et normalise les chemins réécrits par Vercel Serverless.
-    Vercel transmet l'URL d'origine dans x-matched-path.
+    Restaure le chemin demandé après la réécriture vers la fonction Vercel.
     """
-    matched_path = request.headers.get("x-matched-path")
-    if matched_path:
-        request.scope["path"] = matched_path
-    elif request.scope.get("path") in ("/api/index", "/api/index/", "/api", "/api/"):
+    _restore_vercel_route(request.scope)
+    if request.scope.get("path") in ("/api/index", "/api/index/", "/api", "/api/"):
         request.scope["path"] = "/"
     return await call_next(request)
 
