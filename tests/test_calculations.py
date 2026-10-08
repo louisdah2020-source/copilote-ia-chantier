@@ -40,6 +40,17 @@ def test_calculations_and_alerts():
     acier_alerts = [a for a in alerts if "acier" in a.description.lower() or "acier" in a.action_recommandee.lower()]
     assert len(acier_alerts) > 0, "L'alerte acier doit être présente"
 
+    # La date par défaut doit correspondre au dernier arrêté fourni par le classeur.
+    kpi_default_date = ConstructionCalculationEngine(data).calculate_all()
+    assert kpi_default_date.date_analyse == "2027-02-08"
+
+    # Sans dates de suivi ni tâches, le moteur ne doit pas inventer un retard fixe.
+    no_schedule_data = dict(data)
+    no_schedule_data["planning"] = []
+    no_schedule_data["avancement"] = []
+    no_schedule_kpi = ConstructionCalculationEngine(no_schedule_data).calculate_all(date_analyse="2027-02-08")
+    assert no_schedule_kpi.chantier.retard_global_jours == 0
+
     print("[OK] Test Calculations & Alerts : Succes !")
 
 

@@ -25,7 +25,9 @@ class DataValidationEngine:
         # Le fichier est valide si aucune incohérence bloquante n'est détectée
         self.report.est_valide = (
             len(self.report.anomalies_prix) == 0 and 
-            len(self.report.anomalies_dates) == 0
+            len(self.report.anomalies_dates) == 0 and
+            len(self.report.doublons) == 0 and
+            len(self.report.valeurs_manquantes) == 0
         )
         return self.report
 

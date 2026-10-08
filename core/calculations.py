@@ -26,8 +26,11 @@ class ConstructionCalculationEngine:
         self.materials: List[MaterialItem] = data.get("materiaux", [])
         self.workforce: List[WorkforceItem] = data.get("main_oeuvre", [])
 
-    def calculate_all(self, date_analyse: str = "2027-02-08") -> KPISummary:
+    def calculate_all(self, date_analyse: str = None) -> KPISummary:
         """Exécute tous les calculs et assemble le KPI Summary consolidé."""
+        if not date_analyse:
+            dates_avancement = [a.date for a in self.data.get("avancement", []) if a.date]
+            date_analyse = max(dates_avancement) if dates_avancement else date.today().isoformat()
         financial_summary = self.calculate_finances()
         site_summary, lot_progress = self.calculate_site_progress()
         material_stats = self.calculate_materials(lot_progress)
@@ -147,18 +150,28 @@ class ConstructionCalculationEngine:
             if 0 < t.pct_reel < 100 or t.statut.lower() in ("en cours", "encours")
         )
 
-        # Évaluation du retard en jours (retard maximum sur une tâche en retard ou moyenne pondérée)
+        # Estimation du retard à partir du retard d'avancement et de la durée planifiée.
+        # Si les dates ou les avancements ne permettent pas d'estimation, le résultat reste nul.
         max_delay_days = 0
         for t in self.tasks:
-            if t.ecart < -10 and t.fin_prevue:
-                # Approximation : 1% de retard physique = 0.5 à 1 jour de chantier
-                approx_days = int(abs(t.ecart) * 0.6)
-                max_delay_days = max(max_delay_days, approx_days)
-
-        if max_delay_days == 0 and sum_weighted_reel < sum_weighted_prevu:
-            # Écart global négatif
-            ecart_pts = sum_weighted_prevu - sum_weighted_reel
-            max_delay_days = max(1, int(ecart_pts * 1.5))
+            # Retard constaté sur les dates réelles déjà renseignées.
+            for actual_value, planned_value in ((t.debut_reel, t.debut_prevu), (t.fin_reelle, t.fin_prevue)):
+                if actual_value and planned_value:
+                    try:
+                        actual_date = datetime.strptime(actual_value, "%Y-%m-%d").date()
+                        planned_date = datetime.strptime(planned_value, "%Y-%m-%d").date()
+                        max_delay_days = max(max_delay_days, max(0, (actual_date - planned_date).days))
+                    except ValueError:
+                        pass
+            if t.ecart < 0 and t.debut_prevu and t.fin_prevue:
+                try:
+                    start = datetime.strptime(t.debut_prevu, "%Y-%m-%d").date()
+                    end = datetime.strptime(t.fin_prevue, "%Y-%m-%d").date()
+                    duration_days = max(0, (end - start).days)
+                    estimated_days = int(round(duration_days * abs(t.ecart) / 100.0))
+                    max_delay_days = max(max_delay_days, estimated_days)
+                except ValueError:
+                    continue
 
         # Avancement financier = Dépenses engagées / Budget révisé
         depenses_totales = sum(
@@ -178,7 +191,7 @@ class ConstructionCalculationEngine:
             nb_taches_terminees=tasks_done,
             nb_taches_en_cours=tasks_in_progress,
             nb_taches_en_retard=tasks_late,
-            retard_global_jours=max_delay_days or 8
+            retard_global_jours=max_delay_days
         )
         return site_summary, lot_progress
 

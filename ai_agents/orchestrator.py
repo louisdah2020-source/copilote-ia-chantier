@@ -42,7 +42,9 @@ class CopilotOrchestrator:
             f"• Finances : {kpi.finances.depenses_engagees:,.0f} {kpi.parametres.devise} engagés sur {kpi.finances.budget_revise:,.0f} "
             f"({kpi.finances.pct_consommation_budget}% consommé).\n"
             f"• Risques : {len(kpi.alertes_critiques)} alerte(s) critique(s) 🔴 et {len(kpi.alertes_moyennes)} à surveiller 🟠.\n"
-            f"• Matériaux clés : Surconsommation notoire sur l'acier et tension sur le gros œuvre."
+            f"• Matériaux : {len(kpi.materiaux_alertes)} lignes suivies, "
+            f"{sum(1 for m in kpi.materiaux_alertes if m['surconsommation_pct'] > 5)} surconsommation(s) > 5%, "
+            f"{sum(1 for m in kpi.materiaux_alertes if m['alerte_stock_faible'])} stock(s) faible(s)."
         )
 
         return {
@@ -70,22 +72,22 @@ class CopilotOrchestrator:
             if "pourquoi" in q or "retard" in q or "delai" in q or "délai" in q:
                 pe = full_diagnosis["planning_engineer"]
                 lots_retard = ", ".join(f"**{l['lot']}** ({l['ecart_avancement']} points)" for l in pe.get("lots_en_retard", [])[:2])
+                lots_text = lots_retard or "Aucun lot en retard selon les écarts du classeur."
                 return (
                     f"⏱️ **Analyse du Retard par le Planning Engineer :**\n\n"
                     f"Le chantier accuse actuellement un glissement de **{ch.retard_global_jours} jours** "
                     f"avec un avancement réel de **{ch.avancement_physique_global}%** contre **{ch.avancement_prevu_global}%** programmé "
                     f"(écart de **{ch.ecart_avancement_global:+.1f} points**).\n\n"
-                    f"**Causes principales :**\n"
-                    f"1. Le retard est principalement concentré sur les lots : {lots_retard or 'Gros œuvre'}.\n"
-                    f"2. Sur le gros œuvre, la mise en œuvre des planchers et poteaux a pris du décalage (cadence de coulage et ferraillage).\n"
-                    f"3. Les réceptions résiduelles des fondations ont également créé un décalage de démarrage de 6 jours.\n\n"
-                    f"💡 **Recommandation immédiate :** Renforcer l'équipe de coffrage/ferraillage et réordonnancer les tâches non critiques en parallèle."
+                    f"**Lots les plus en retard selon les données :** {lots_text}.\n\n"
+                    f"Le classeur ne contient pas les causes opérationnelles ni les liens de dépendance entre tâches. "
+                    f"Il ne permet donc pas d'attribuer une cause précise ni de recalculer le chemin critique. "
+                    f"**Étape utile :** vérifier les tâches et les dates des lots signalés avec leurs responsables."
                 )
 
         # 2. Questions sur le budget et les coûts
         if any(kw in q for kw in ["budget", "coûte", "coute", "cher", "dépense", "depense", "financier", "argent", "eac"]):
             cc = full_diagnosis["cost_controller"]
-            top_lot = cc.get("lot_plus_couteux", "Gros œuvre")
+            top_lot = cc.get("lot_plus_couteux", "N/A")
             lots_dep = cc.get("lots_en_depassement", [])
             dep_txt = f"Lots en dépassement : {', '.join(lots_dep)}" if lots_dep else "Aucun lot en dépassement sec à ce jour."
             return (
@@ -95,7 +97,7 @@ class CopilotOrchestrator:
                 f"• **Lot le plus coûteux** : C'est le lot **{top_lot}**.\n"
                 f"• **Situation des enveloppes** : {dep_txt}\n"
                 f"• **Coût prévisionnel final (EAC)** : Estimé à **{cc.get('eac_projection', fin.budget_revise):,.0f} {devise}**.\n\n"
-                f"💡 **Recommandation :** Exercer un contrôle strict sur les factures d'acier et de béton prêt à l'emploi."
+                f"💡 **Recommandation :** comparer les engagements par lot à l'avancement déclaré et vérifier les postes en dépassement."
             )
 
         # 3. Questions sur les matériaux et stocks
@@ -105,7 +107,9 @@ class CopilotOrchestrator:
             ruptures = mc.get("ruptures_potentielles", [])
             
             reponse = "📦 **Bilan Matériaux par le Material Controller :**\n\n"
-            if surconso:
+            if not kpi.materiaux_alertes:
+                reponse += "Aucun matériau n'est renseigné dans le classeur.\n"
+            elif surconso:
                 reponse += "🚨 **Surconsommations détectées :**\n"
                 for s in surconso:
                     reponse += f"- **{s['materiau']} ({s['lot']})** : Surconsommation de **+{s['surconsommation_pct']}%** par rapport au ratio théorique m³/kg.\n"
@@ -113,10 +117,11 @@ class CopilotOrchestrator:
                 reponse += "\n⚠️ **Points de rupture de stock :**\n"
                 for r in ruptures:
                     reponse += f"- **{r['materiau']} ({r['lot']})** : Stock actuel = **{r['stock']} {r['unite']}**.\n"
-            if not surconso and not ruptures:
+            if kpi.materiaux_alertes and not surconso and not ruptures:
                 reponse += "Tous les matériaux suivis présentent des stocks suffisants et des consommations conformes.\n"
                 
-            reponse += "\n💡 **Action :** Sensibiliser au calepinage des fers et contrôler les réceptions sur site."
+            if surconso or ruptures:
+                reponse += "\n💡 **Action :** contrôler les quantités et les réceptions des matériaux signalés dans le classeur."
             return reponse
 
         # 4. Questions sur les risques et alertes
@@ -127,10 +132,9 @@ class CopilotOrchestrator:
                 f"• Indice de criticité globale : **{ra.get('risk_score')}/100** ({ra.get('statut')})\n"
                 f"• Alertes critiques 🔴 : **{ra.get('nb_alertes_critiques')}**\n"
                 f"• Alertes moyennes 🟠 : **{ra.get('nb_alertes_moyennes')}**\n\n"
-                f"**Top 3 des Menaces prioritaires :**\n"
-                f"1. Risque de glissement de la livraison dû au goulot d'étranglement sur le gros œuvre.\n"
-                f"2. Dérive budgétaire par surconsommation d'armatures métalliques.\n"
-                f"3. Rupture ponctuelle sur certains aciers de fondations/semelles."
+                f"**Alertes critiques issues des données :**\n"
+                + ("\n".join(f"- **{item['type']} — {item['lot']}** : {item['description']}" for item in ra.get("top_risques", [])[:3])
+                   if ra.get("top_risques") else "Aucune alerte critique n'est enregistrée.")
             )
 
         # 5. Demande de rapport

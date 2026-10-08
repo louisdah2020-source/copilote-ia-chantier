@@ -20,17 +20,28 @@ class ReportGeneratorAgent(BaseChantierAgent):
         ch = kpi.chantier
         fin = kpi.finances
         devise = params.devise
+        surconsommations = sorted(
+            (m for m in kpi.materiaux_alertes if m["surconsommation_pct"] > 5),
+            key=lambda m: m["surconsommation_pct"], reverse=True
+        )
+        stocks_faibles = [m for m in kpi.materiaux_alertes if m["alerte_stock_faible"]]
+        lots_en_retard = [l["lot"] for l in kpi.repartition_lots if l["ecart_avancement"] < -5]
+        surconso_text = ", ".join(
+            "{} ({:+.1f}%)".format(m["materiau"], m["surconsommation_pct"])
+            for m in surconsommations
+        )
+        stock_text = ", ".join(m["materiau"] for m in stocks_faibles)
 
         # Synthèse hebdomadaire type
         synthese_exec = (
             f"Au {kpi.date_analyse}, le chantier '{params.projet}' ({params.localisation}) affiche un avancement "
             f"physique global de {ch.avancement_physique_global}%, contre {ch.avancement_prevu_global}% programmé. "
-            f"L'écart de {ch.ecart_avancement_global:+.1f} points se traduit par un glissement prévisionnel de "
-            f"{ch.retard_global_jours} jours sur le chemin critique, localisé principalement sur le gros œuvre. "
+            f"L'écart est de {ch.ecart_avancement_global:+.1f} points. Le retard estimé à partir des écarts "
+            f"d'avancement et des durées renseignées est de {ch.retard_global_jours} jours. "
             f"Sur le plan financier, les engagements s'élèvent à {fin.depenses_engagees:,.0f} {devise} "
             f"({fin.pct_consommation_budget}% du budget révisé de {fin.budget_revise:,.0f} {devise}). "
-            f"La gestion des matériaux nécessite une vigilance immédiate sur l'acier, qui présente une surconsommation "
-            f"de l'ordre de 11% par rapport au ratio nominal."
+            + (f"Les surconsommations supérieures à 5% concernent : {surconso_text}. " if surconsommations else "Aucune surconsommation supérieure à 5% n'est détectée dans les données. ")
+            + (f"Stocks faibles : {stock_text}." if stocks_faibles else "Aucun stock faible n'est signalé selon le seuil configuré.")
         )
 
         # Rapport complet structuré en Markdown
@@ -54,11 +65,11 @@ class ReportGeneratorAgent(BaseChantierAgent):
 
 ---
 
-## 2. Synthèse de l'Avancement Physique
+        ## 2. Synthèse de l'Avancement Physique
 - **Tâches achevées** : {ch.nb_taches_terminees} / {ch.nb_taches_total}
 - **Tâches en cours** : {ch.nb_taches_en_cours}
 - **Tâches en dérive / retard** : {ch.nb_taches_en_retard}
-- **Points d'attention planning** : Le gros œuvre concentre le chemin critique. La cadence actuelle de ferraillage et coffrage des planchers nécessite un renfort d'équipe pour éviter le report de la date de livraison.
+- **Points d'attention planning** : {', '.join(lots_en_retard) if lots_en_retard else 'Aucun lot ne dépasse le seuil de retard configuré.'}
 
 ---
 
@@ -72,9 +83,8 @@ class ReportGeneratorAgent(BaseChantierAgent):
 ---
 
 ## 4. Approvisionnements & Matériaux
-- Vigilance accrue sur les aciers haute adhérence (consommation réelle excédentaire par rapport au ratio théorique).
-- Le stock des ciments et granulats est conforme aux besoins de production des 10 prochains jours.
-- Rupture à anticiper sur les aciers de semelles (stock épuisé).
+{('Surconsommations détectées : ' + surconso_text + '.') if surconsommations else 'Aucune surconsommation supérieure à 5% détectée.'}
+{('Stocks faibles : ' + stock_text + '.') if stocks_faibles else 'Aucun stock faible détecté selon le seuil configuré.'}
 
 ---
 
@@ -87,7 +97,7 @@ class ReportGeneratorAgent(BaseChantierAgent):
 
         markdown_report += f"""
 ---
-*Document généré automatiquement par le Copilote IA Chantier — Conforme aux règles d'ingénierie BTP.*
+*Document généré automatiquement à partir des données du classeur fourni.*
 """
 
         return {

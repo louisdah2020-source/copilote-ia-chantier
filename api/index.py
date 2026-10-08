@@ -8,6 +8,8 @@ import sys
 import io
 import os
 import json
+import uuid
+import re
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
@@ -51,6 +53,12 @@ async def vercel_routing_middleware(request: Request, call_next):
 DATA_CACHE = {}
 
 
+def _safe_download_name(value: str, fallback: str = "chantier") -> str:
+    """Produit un nom de fichier sans séparateur ni caractère d'en-tête dangereux."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", value or "").strip("_")[:80]
+    return cleaned or fallback
+
+
 def get_current_data(filepath: Optional[str] = None, force_refresh: bool = False):
     """Charge et calcule les indicateurs en mémoire cache."""
     target_path = filepath
@@ -72,7 +80,7 @@ def get_current_data(filepath: Optional[str] = None, force_refresh: bool = False
     val_report = validator.validate()
 
     calc = ConstructionCalculationEngine(data)
-    kpi = calc.calculate_all(date_analyse=data["parametres"].date_debut or "2027-02-08")
+    kpi = calc.calculate_all()
 
     alert_engine = AlertEngine(kpi, val_report)
     alerts = alert_engine.evaluate_all(today_str=kpi.date_analyse)
@@ -130,7 +138,7 @@ def _format_kpi_payload(state):
         ],
         "nb_critiques": len(kpi.alertes_critiques),
         "nb_moyennes": len(kpi.alertes_moyennes),
-        "nb_normales": len(kpi.alertes_normales) or 12,
+        "nb_normales": len(kpi.alertes_normales),
         "synthese_executive": diag["report_generator"]["synthese_executive"],
         "lignes_auditees": val.total_lignes,
         "lots_detectes": val.nb_lots,
@@ -159,17 +167,21 @@ async def upload_excel(file: UploadFile = File(...)):
     Permet à l'ingénieur de déposer son propre classeur Excel de chantier.
     Lit, valide, recalcule et renvoie immédiatement l'état dynamique mis à jour.
     """
-    if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xlsm") or file.filename.endswith(".xls")):
-        raise HTTPException(status_code=400, detail="Format de fichier invalide. Veuillez déposer un fichier Excel (.xlsx ou .xlsm).")
+    filename = file.filename or ""
+    if Path(filename).suffix.lower() not in (".xlsx", ".xlsm"):
+        raise HTTPException(status_code=400, detail="Format invalide. Veuillez déposer un fichier .xlsx ou .xlsm.")
 
     # Déterminer un répertoire temporaire d'écriture (supporte Vercel /tmp)
     target_dir = Path("/tmp") if Path("/tmp").exists() and os.access("/tmp", os.W_OK) else ROOT_DIR / "data" / "uploads"
     target_dir.mkdir(parents=True, exist_ok=True)
     
-    clean_name = file.filename.replace(" ", "_")
-    target_path = target_dir / f"user_{clean_name}"
+    clean_name = Path(filename).name.replace(" ", "_")
+    target_path = target_dir / f"user_{uuid.uuid4().hex}_{clean_name}"
     
-    content = await file.read()
+    max_upload_bytes = 25 * 1024 * 1024
+    content = await file.read(max_upload_bytes + 1)
+    if len(content) > max_upload_bytes:
+        raise HTTPException(status_code=413, detail="Le classeur dépasse la limite de 25 Mo.")
     with open(target_path, "wb") as f_out:
         f_out.write(content)
 
@@ -247,7 +259,7 @@ def export_pdf(file: Optional[str] = None):
     pdf_gen.generate(buffer)
     buffer.seek(0)
 
-    filename = f"Rapport_Chantier_{kpi.parametres.projet.replace(' ', '_')}.pdf"
+    filename = f"Rapport_Chantier_{_safe_download_name(kpi.parametres.projet)}.pdf"
     return Response(
         content=buffer.getvalue(),
         media_type="application/pdf",
@@ -269,7 +281,7 @@ def export_excel(file: Optional[str] = None):
     exporter.export(buffer)
     buffer.seek(0)
 
-    filename = f"Suivi_Chantier_Consolide_{kpi.parametres.projet.replace(' ', '_')}.xlsx"
+    filename = f"Suivi_Chantier_Consolide_{_safe_download_name(kpi.parametres.projet)}.xlsx"
     return Response(
         content=buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -285,7 +297,7 @@ def index_html():
     """Sert l'application web monopage dynamique et interactive avec glisser-déposer de classeur."""
     state = get_current_data()
     initial_kpi = _format_kpi_payload(state)
-    initial_json = json.dumps(initial_kpi, ensure_ascii=False)
+    initial_json = json.dumps(initial_kpi, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
     html_content = f"""<!DOCTYPE html>
 <html lang="fr">
@@ -324,7 +336,7 @@ def index_html():
                 <!-- Bouton Déposer Excel -->
                 <label for="excelFileInput" class="cursor-pointer bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-3 py-2 rounded-lg shadow transition flex items-center gap-1.5">
                     <span>⬆️ Déposer mon Excel</span>
-                    <input type="file" id="excelFileInput" accept=".xlsx,.xlsm,.xls" class="hidden" onchange="handleFileUpload(event)">
+                    <input type="file" id="excelFileInput" accept=".xlsx,.xlsm" class="hidden" onchange="handleFileUpload(event)">
                 </label>
 
                 <!-- Sélecteur d'échantillons -->
@@ -514,9 +526,12 @@ def index_html():
 
     </main>
 
-    <script>
+<script>
         // Données d'état courant
         let currentData = {initial_json};
+        function escapeHtml(value) {{
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
+        }}
         let chartAvancementInstance = null;
         let chartBudgetInstance = null;
 
@@ -556,7 +571,7 @@ def index_html():
         async function uploadFileObject(file) {{
             const banner = document.getElementById('uploadBanner');
             banner.className = 'mb-6 p-4 rounded-xl border bg-blue-50 border-blue-200 text-blue-900 text-sm font-medium flex items-center justify-between';
-            banner.innerHTML = `<span>⏳ Ingestion et analyse du classeur <b>${{file.name}}</b> en cours...</span>`;
+            banner.innerHTML = `<span>⏳ Ingestion et analyse du classeur <b>${{escapeHtml(file.name)}}</b> en cours...</span>`;
             banner.classList.remove('hidden');
 
             const formData = new FormData();
@@ -572,13 +587,13 @@ def index_html():
                     currentData = json.data;
                     renderDashboard(currentData);
                     banner.className = 'mb-6 p-4 rounded-xl border bg-emerald-50 border-emerald-300 text-emerald-900 text-sm font-medium flex items-center justify-between';
-                    banner.innerHTML = `<span>✓ <b>${{file.name}}</b> analysé avec succès ! (${{currentData.lignes_auditees}} lignes, ${{currentData.lots_detectes}} lots, ${{currentData.taches_detectees}} tâches recensées)</span><button onclick="document.getElementById('uploadBanner').classList.add('hidden')" class="text-xs text-emerald-700 font-bold hover:underline">Fermer</button>`;
+                    banner.innerHTML = `<span>✓ <b>${{escapeHtml(file.name)}}</b> analysé avec succès ! (${{currentData.lignes_auditees}} lignes, ${{currentData.lots_detectes}} lots, ${{currentData.taches_detectees}} tâches recensées)</span><button onclick="document.getElementById('uploadBanner').classList.add('hidden')" class="text-xs text-emerald-700 font-bold hover:underline">Fermer</button>`;
                 }} else {{
                     throw new Error(json.detail || 'Erreur inconnue lors du traitement.');
                 }}
             }} catch (err) {{
                 banner.className = 'mb-6 p-4 rounded-xl border bg-red-50 border-red-300 text-red-900 text-sm font-medium flex items-center justify-between';
-                banner.innerHTML = `<span>❌ Échec du traitement : ${{err.message}}</span><button onclick="document.getElementById('uploadBanner').classList.add('hidden')" class="text-xs text-red-700 font-bold hover:underline">Fermer</button>`;
+                banner.innerHTML = `<span>❌ Échec du traitement : ${{escapeHtml(err.message)}}</span><button onclick="document.getElementById('uploadBanner').classList.add('hidden')" class="text-xs text-red-700 font-bold hover:underline">Fermer</button>`;
             }}
         }}
 
@@ -636,7 +651,7 @@ def index_html():
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-slate-50/80';
                 tr.innerHTML = `
-                    <td class="p-3.5 font-medium text-slate-900">${{l.lot}}</td>
+                    <td class="p-3.5 font-medium text-slate-900">${{escapeHtml(l.lot)}}</td>
                     <td class="p-3.5">${{Number(l.budget).toLocaleString()}}</td>
                     <td class="p-3.5 font-semibold text-amber-600">${{Number(l.depenses).toLocaleString()}}</td>
                     <td class="p-3.5">${{l.pct_conso}}%</td>
@@ -655,11 +670,11 @@ def index_html():
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-slate-50/80';
                 tr.innerHTML = `
-                    <td class="p-3.5 font-medium text-slate-900">${{m.materiau}}</td>
-                    <td class="p-3.5">${{m.lot}}</td>
-                    <td class="p-3.5">${{Number(m.quantite_prevue).toLocaleString()}} ${{m.unite}}</td>
-                    <td class="p-3.5 font-medium">${{Number(m.quantite_consommee).toLocaleString()}} ${{m.unite}}</td>
-                    <td class="p-3.5">${{Number(m.stock).toLocaleString()}} ${{m.unite}}</td>
+                    <td class="p-3.5 font-medium text-slate-900">${{escapeHtml(m.materiau)}}</td>
+                    <td class="p-3.5">${{escapeHtml(m.lot)}}</td>
+                    <td class="p-3.5">${{Number(m.quantite_prevue).toLocaleString()}} ${{escapeHtml(m.unite)}}</td>
+                    <td class="p-3.5 font-medium">${{Number(m.quantite_consommee).toLocaleString()}} ${{escapeHtml(m.unite)}}</td>
+                    <td class="p-3.5">${{Number(m.stock).toLocaleString()}} ${{escapeHtml(m.unite)}}</td>
                     <td class="p-3.5 font-bold ${{m.surconsommation_pct > 5 ? 'text-red-600' : 'text-slate-600'}}">${{m.surconsommation_pct > 0 ? '+' : ''}}${{m.surconsommation_pct}}%</td>
                 `;
                 tbodyMat.appendChild(tr);
@@ -674,11 +689,11 @@ def index_html():
                 div.className = `bg-white p-4 rounded-xl shadow-sm border-l-4 ${{isCrit ? 'border-red-600' : 'border-amber-500'}} flex flex-col gap-1`;
                 div.innerHTML = `
                     <div class="flex justify-between items-center">
-                        <span class="font-bold text-sm text-slate-900">[${{a.type}}] ${{a.lot}}</span>
-                        <span class="${{isCrit ? 'badge-red' : 'badge-amber'}} text-xs font-semibold px-2 py-0.5 rounded">${{a.gravite}}</span>
+                         <span class="font-bold text-sm text-slate-900">[${{escapeHtml(a.type)}}] ${{escapeHtml(a.lot)}}</span>
+                         <span class="${{isCrit ? 'badge-red' : 'badge-amber'}} text-xs font-semibold px-2 py-0.5 rounded">${{escapeHtml(a.gravite)}}</span>
                     </div>
-                    <div class="text-sm text-slate-700 mt-1">${{a.description}}</div>
-                    <div class="text-xs text-blue-900 font-semibold mt-1">Action recommandée : <span class="font-normal text-slate-600">${{a.action}}</span></div>
+                     <div class="text-sm text-slate-700 mt-1">${{escapeHtml(a.description)}}</div>
+                     <div class="text-xs text-blue-900 font-semibold mt-1">Action recommandée : <span class="font-normal text-slate-600">${{escapeHtml(a.action)}}</span></div>
                 `;
                 alertesContainer.appendChild(div);
             }});

@@ -3,6 +3,7 @@ tests/test_agents.py
 Tests unitaires de l'orchestration multi-agents et des exports PDF / Excel.
 """
 import sys
+from io import BytesIO
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -46,12 +47,18 @@ def test_agents_and_exports():
     pdf_gen = PDFReportGenerator(kpi, alerts, diagnosis)
     pdf_path = pdf_gen.generate(str(pdf_out))
     assert Path(pdf_path).exists() and Path(pdf_path).stat().st_size > 1000
+    pdf_buffer = BytesIO()
+    pdf_gen.generate(pdf_buffer)
+    assert pdf_buffer.getvalue().startswith(b"%PDF-")
 
     # 4. Test Export Excel consolidé
     xlsx_out = ROOT_DIR / "data" / "exports" / "test_consolidated.xlsx"
     ex_exporter = ExcelExporter(str(s4_file), kpi, alerts)
     ex_path = ex_exporter.export(str(xlsx_out))
     assert Path(ex_path).exists() and Path(ex_path).stat().st_size > 1000
+    excel_buffer = BytesIO()
+    ex_exporter.export(excel_buffer)
+    assert excel_buffer.getvalue().startswith(b"PK")
 
     print("[OK] Test Agents & Exports : Succes !")
 

@@ -6,6 +6,8 @@ le radar des alertes, le copilote IA conversationnel et l'export PDF / Excel.
 """
 import os
 import sys
+import html
+import tempfile
 from pathlib import Path
 import streamlit as st
 import pandas as pd
@@ -128,7 +130,7 @@ def load_and_process_workbook(filepath: str):
     val_report = validator.validate()
     
     calc_engine = ConstructionCalculationEngine(data)
-    kpi = calc_engine.calculate_all(date_analyse=data["parametres"].date_debut or "2027-02-08")
+    kpi = calc_engine.calculate_all()
     
     alert_engine = AlertEngine(kpi, val_report)
     alerts = alert_engine.evaluate_all(today_str=kpi.date_analyse)
@@ -183,10 +185,11 @@ def main():
     if "Importer" in source_option:
         uploaded_file = st.sidebar.file_uploader("Déposer le fichier Excel du chantier", type=["xlsx", "xlsm"])
         if uploaded_file is not None:
-            temp_path = ROOT_DIR / "data" / "temp_uploaded.xlsx"
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            current_path = str(temp_path)
+            upload_dir = ROOT_DIR / "data" / "uploads"
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(prefix="streamlit_", suffix=".xlsx", dir=upload_dir, delete=False) as temp_file:
+                temp_file.write(uploaded_file.getbuffer())
+                current_path = temp_file.name
         else:
             st.sidebar.info("Veuillez téléverser un fichier pour démarrer l'analyse.")
             current_path = str(s4_file)
@@ -285,7 +288,7 @@ def main():
         # Synthèse IA & Badges alertes
         nb_crit = len(kpi.alertes_critiques)
         nb_moy = len(kpi.alertes_moyennes)
-        nb_norm = len(kpi.alertes_normales) or 12
+        nb_norm = len(kpi.alertes_normales)
 
         st.markdown(f"""
         <div style="margin: 10px 0 16px 0; display:flex; gap:12px; align-items:center;">
@@ -299,7 +302,7 @@ def main():
         st.markdown(f"""
         <div class="agent-box">
             <b>🤖 Diagnostic Automatique du Copilote IA :</b><br/>
-            {diagnosis['report_generator']['synthese_executive']}
+            {html.escape(diagnosis['report_generator']['synthese_executive'])}
         </div>
         """, unsafe_allow_html=True)
 
@@ -539,11 +542,11 @@ def main():
             st.markdown(f"""
             <div style="background:white; border-radius:8px; padding:12px 16px; margin-bottom:10px; border-left:4px solid {'#DC2626' if '🔴' in a.gravite else '#F59E0B'}; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <b>[{a.type_alerte}] {a.lot}</b>
-                    <span class="{badge_class}">{a.gravite}</span>
+                <b>[{html.escape(a.type_alerte)}] {html.escape(a.lot)}</b>
+                    <span class="{badge_class}">{html.escape(a.gravite)}</span>
                 </div>
-                <div style="margin-top:6px; color:#374151;">{a.description}</div>
-                <div style="margin-top:6px; font-size:13px; color:#1E3A8A;"><b>Action recommandée :</b> {a.action_recommandee}</div>
+                <div style="margin-top:6px; color:#374151;">{html.escape(a.description)}</div>
+                <div style="margin-top:6px; font-size:13px; color:#1E3A8A;"><b>Action recommandée :</b> {html.escape(a.action_recommandee)}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -577,11 +580,7 @@ def main():
         if user_prompt:
             with st.spinner("Analyse par le comité multi-agents en cours..."):
                 response = orchestrator.answer_question(user_prompt, kpi, diagnosis)
-                st.markdown(f"""
-                <div style="background:white; border-radius:10px; padding:16px 20px; border:1px solid #CBD5E1; margin-top:12px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                    {response}
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(response)
 
     # ----------------------------------------------------
     # TAB 8 : EXPORTS & RAPPORTS
@@ -593,7 +592,8 @@ def main():
         rep_col1, rep_col2 = st.columns(2)
         
         # 1. Génération PDF
-        pdf_out = ROOT_DIR / "data" / "exports" / f"Rapport_Chantier_{kpi.parametres.projet.replace(' ', '_')}.pdf"
+        safe_project_name = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in kpi.parametres.projet).strip("_")[:80] or "chantier"
+        pdf_out = ROOT_DIR / "data" / "exports" / f"Rapport_Chantier_{safe_project_name}.pdf"
         with rep_col1:
             st.markdown("#### 📄 Rapport Exécutif PDF")
             st.write("Mise en page certifiée avec indicateurs clés, analyse des lots, suivi matériaux et alertes.")
@@ -612,7 +612,7 @@ def main():
                     )
 
         # 2. Export Excel enrichi
-        xlsx_out = ROOT_DIR / "data" / "exports" / f"Suivi_Chantier_{kpi.parametres.projet.replace(' ', '_')}_Consolide.xlsx"
+        xlsx_out = ROOT_DIR / "data" / "exports" / f"Suivi_Chantier_{safe_project_name}_Consolide.xlsx"
         with rep_col2:
             st.markdown("#### 📊 Classeur Excel Mis à Jour")
             st.write("Classeur Excel avec les feuilles **AVANCEMENT** et **ALERTES** automatiquement complétées.")

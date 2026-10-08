@@ -34,9 +34,7 @@ class MaterialControllerAgent(BaseChantierAgent):
             details = ", ".join(f"{m['materiau']} (+{m['surconsommation_pct']}%)" for m in surconso_items)
             commentaire += (
                 f"Une surconsommation anormale est mise en évidence sur : {details}. "
-                f"Pour l'acier par exemple, la consommation réelle dépasse les ratios théoriques de ferraillage. "
-                f"Cela peut s'expliquer par des chutes excessives lors du façonnage, des erreurs de calepinage "
-                f"ou des longueurs de recouvrement non optimisées sur les armatures. "
+                f"Les causes ne sont pas renseignées dans le classeur et doivent être vérifiées sur site. "
             )
         else:
             commentaire += "Les consommations réelles respectent les ratios prévus au devis quantitatif. "
@@ -47,8 +45,8 @@ class MaterialControllerAgent(BaseChantierAgent):
 
         recommandations = []
         if surconso_items:
-            recommandations.append("Sensibiliser les ferrailleurs et maçons au recyclage des chutes et au respect strict des plans d'armatures.")
-            recommandations.append("Mettre en place un contrôle contradictoire systématique des bons de livraison avec pesée sur pont-bascule.")
+            recommandations.append("Vérifier les fiches de consommation et les quantités réellement mises en œuvre pour les matériaux signalés.")
+            recommandations.append("Contrôler les bons de livraison et les stocks physiques des matériaux concernés.")
         if rupture_items:
             recommandations.append("Déclencher un bon de commande de réapprovisionnement d'urgence pour les matériaux à stock épuisé.")
 

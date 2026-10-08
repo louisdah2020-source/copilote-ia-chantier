@@ -17,8 +17,9 @@ class AlertEngine:
         self.validation = validation_report
         self.alerts: List[AlertItem] = []
 
-    def evaluate_all(self, today_str: str = "2027-02-08") -> List[AlertItem]:
+    def evaluate_all(self, today_str: str = None) -> List[AlertItem]:
         """Évalue l'ensemble des règles métiers et produit la liste ordonnée des alertes."""
+        today_str = today_str or self.kpi.date_analyse
         self.alerts = []
         self._check_budget_alerts(today_str)
         self._check_planning_alerts(today_str)
@@ -115,8 +116,8 @@ class AlertEngine:
                 type_alerte="Planning",
                 lot="Gros œuvre / Chemin critique",
                 gravite="🔴 Haute",
-                description=f"Retard global estimé à {self.kpi.chantier.retard_global_jours} jours sur la date de livraison contractuelle.",
-                action_recommandee="Établir un planning de rattrapage d'urgence sous 48h avec les conducteurs de travaux."
+                description=f"Retard estimé à {self.kpi.chantier.retard_global_jours} jours d'après les dates et écarts disponibles dans le classeur.",
+                action_recommandee="Vérifier les tâches concernées et recalculer les impacts à partir du planning détaillé et de ses dépendances."
             ))
 
     def _check_materials_alerts(self, today_str: str):
@@ -183,3 +184,15 @@ class AlertEngine:
                     description=p,
                     action_recommandee="Vérifier le bordereau de prix unitaires dans la feuille BUDGET."
                 ))
+        for anomaly in self.validation.anomalies_dates:
+            self.alerts.append(AlertItem(
+                date=today_str, type_alerte="Données", lot="Contrôle Saisie",
+                gravite="🔴 Haute", description=anomaly,
+                action_recommandee="Corriger les dates dans le classeur avant d'interpréter les délais."
+            ))
+        for missing in self.validation.valeurs_manquantes:
+            self.alerts.append(AlertItem(
+                date=today_str, type_alerte="Données", lot="Contrôle Saisie",
+                gravite="🟠 Moyenne", description=missing,
+                action_recommandee="Compléter les champs requis puis relancer l'analyse."
+            ))

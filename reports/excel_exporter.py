@@ -72,6 +72,7 @@ class ExcelExporter:
             ])
         _apply_table_styling(ws_alt)
 
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        if not hasattr(output_path, "write"):
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         wb.save(output_path)
         return output_path

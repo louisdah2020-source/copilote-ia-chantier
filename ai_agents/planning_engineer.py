@@ -46,9 +46,9 @@ class PlanningEngineerAgent(BaseChantierAgent):
             noms_lots = ", ".join(f"'{l['lot']}' ({l['ecart_avancement']} pts)" for l in lots_retard[:3])
             commentaire += f"Le retard est principalement concentré sur les lots : {noms_lots}. "
             commentaire += (
-                f"Le glissement estimé sur le chemin critique est actuellement évalué à environ {retard_jours} jours ouvrant. "
-                f"Si le rythme d'avancement actuel se maintient sans mesure corrective, la date contractuelle de livraison "
-                f"({kpi.parametres.date_fin_prevue}) sera repoussée d'au moins {retard_jours} à {retard_jours + 4} jours."
+                f"Le retard estimé est de {retard_jours} jours, sur la base des écarts d'avancement et des durées prévues. "
+                f"Il s'agit d'une approximation : le classeur ne décrit pas les dépendances entre tâches nécessaires "
+                f"au calcul d'un chemin critique ni à une date de fin recalculée."
             )
         else:
             commentaire += "Aucun lot majeur ne présente de dérive négative significative sur les jalons clés."
@@ -57,7 +57,7 @@ class PlanningEngineerAgent(BaseChantierAgent):
         if lots_retard:
             recommandations.append(f"Renforcer les effectifs sur le lot '{lots_retard[0]['lot']}' (équipes coffrage/ferraillage).")
             recommandations.append("Autoriser les plages de travail étendues (heures supplémentaires ou samedi matin).")
-            recommandations.append("Recaler le chemin critique pour chevaucher les tâches de second œuvre sans attendre l'achèvement complet.")
+            recommandations.append("Renseigner les dépendances entre tâches avant de recalculer le chemin critique et les dates de livraison.")
         else:
             recommandations.append("Maintenir la cadence d'exécution et sécuriser les réceptions partielles.")
 

@@ -35,9 +35,8 @@ class RiskAnalystAgent(BaseChantierAgent):
         impacts_croises = []
         if kpi.chantier.retard_global_jours > 0:
             impacts_croises.append(
-                f"Impact délai : Le retard de {kpi.chantier.retard_global_jours} jours sur le gros œuvre "
-                "décale l'intervention des corps d'état secondaires (lots techniques électricité & plomberie) "
-                "et engendre un surcoût de location d'engins fixes (grue, échafaudages)."
+                f"Impact potentiel délai : un écart de {kpi.chantier.retard_global_jours} jours peut affecter les tâches suivantes. "
+                "Les dépendances entre tâches et les coûts d'immobilisation ne sont pas fournis, leur impact ne peut donc pas être chiffré."
             )
 
         if any(m["surconsommation_pct"] > 5 for m in kpi.materiaux_alertes):

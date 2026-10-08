@@ -4,6 +4,7 @@ Générateur de rapport de synthèse de chantier au format PDF professionnel.
 Utilise ReportLab pour produire un document exécutif élégant et imprimable.
 """
 from pathlib import Path
+from xml.sax.saxutils import escape
 from typing import List, Dict, Any, Optional
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -25,7 +26,8 @@ class PDFReportGenerator:
 
     def generate(self, output_path: str) -> str:
         """Produit le fichier PDF complet."""
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        if not hasattr(output_path, "write"):
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         doc = SimpleDocTemplate(
             output_path,
             pagesize=A4,
@@ -91,10 +93,10 @@ class PDFReportGenerator:
         elements = []
 
         # En-tête du document
-        p_name = self.kpi.parametres.projet
-        p_client = self.kpi.parametres.client
-        p_loc = self.kpi.parametres.localisation
-        p_ing = self.kpi.parametres.ingenieur
+        p_name = escape(self.kpi.parametres.projet)
+        p_client = escape(self.kpi.parametres.client)
+        p_loc = escape(self.kpi.parametres.localisation)
+        p_ing = escape(self.kpi.parametres.ingenieur)
         date_str = self.kpi.date_analyse
 
         elements.append(Paragraph(f"🏗️ RAPPORT HEBDOMADAIRE DE PILOTAGE DE CHANTIER", title_style))
@@ -136,7 +138,7 @@ class PDFReportGenerator:
             f"contre {self.kpi.chantier.avancement_prevu_global}% programmé. Le retard s'établit à {self.kpi.chantier.retard_global_jours} jours "
             f"avec une consommation budgétaire maîtrisée à {self.kpi.finances.pct_consommation_budget}%."
         ))
-        elements.append(Paragraph(synthese_text, body_style))
+        elements.append(Paragraph(escape(str(synthese_text)), body_style))
         elements.append(Spacer(1, 10))
 
         # 3. Tableau de l'Avancement et des Coûts par Lot
@@ -157,7 +159,7 @@ class PDFReportGenerator:
             ecart_str = f"{l['ecart_avancement']:+.1f}%"
             statut_badge = "🔴 Retard" if l['ecart_avancement'] < -5 else ("🟠 Suivi" if l['ecart_avancement'] < 0 else "🟢 Conforme")
             lots_table_data.append([
-                Paragraph(l["lot"], table_text),
+                Paragraph(escape(str(l["lot"])), table_text),
                 Paragraph(f"{l['budget']:,.0f}", table_text),
                 Paragraph(f"{l['depenses']:,.0f}", table_text),
                 Paragraph(f"{l['pct_conso']}%", table_text),
@@ -193,11 +195,11 @@ class PDFReportGenerator:
         for m in self.kpi.materiaux_alertes[:6]:
             sc_badge = f"<font color='red'><b>+{m['surconsommation_pct']}%</b></font>" if m["surconsommation_pct"] > 5 else f"{m['surconsommation_pct']}%"
             mat_table_data.append([
-                Paragraph(m["materiau"], table_text),
-                Paragraph(m["lot"], table_text),
-                Paragraph(f"{m['quantite_prevue']:,.0f} {m['unite']}", table_text),
-                Paragraph(f"{m['quantite_consommee']:,.0f} {m['unite']}", table_text),
-                Paragraph(f"{m['stock']:,.0f} {m['unite']}", table_text),
+                Paragraph(escape(str(m["materiau"])), table_text),
+                Paragraph(escape(str(m["lot"])), table_text),
+                Paragraph(f"{m['quantite_prevue']:,.0f} {escape(str(m['unite']))}", table_text),
+                Paragraph(f"{m['quantite_consommee']:,.0f} {escape(str(m['unite']))}", table_text),
+                Paragraph(f"{m['stock']:,.0f} {escape(str(m['unite']))}", table_text),
                 Paragraph(sc_badge, table_text)
             ])
         mat_t = Table(mat_table_data, colWidths=[3.5*cm, 3.2*cm, 2.8*cm, 2.8*cm, 2.2*cm, 2.8*cm])
@@ -223,10 +225,10 @@ class PDFReportGenerator:
         ]
         for a in self.alerts[:8]:
             alert_data.append([
-                Paragraph(a.gravite, table_text),
-                Paragraph(f"<b>{a.type_alerte}</b><br/>{a.lot}", table_text),
-                Paragraph(a.description, table_text),
-                Paragraph(f"<i>{a.action_recommandee}</i>", table_text)
+                Paragraph(escape(a.gravite), table_text),
+                Paragraph(f"<b>{escape(a.type_alerte)}</b><br/>{escape(a.lot)}", table_text),
+                Paragraph(escape(a.description), table_text),
+                Paragraph(f"<i>{escape(a.action_recommandee)}</i>", table_text)
             ])
         alt_t = Table(alert_data, colWidths=[2.2*cm, 3.0*cm, 6.0*cm, 5.8*cm])
         alt_t.setStyle(TableStyle([
@@ -244,7 +246,7 @@ class PDFReportGenerator:
             [
                 Paragraph(f"<b>L'Ingénieur de Contrôle</b><br/><br/>{p_ing}", body_style),
                 Paragraph("<b>Le Conducteur de Travaux</b><br/><br/>Pour l'Entreprise Générale", body_style),
-                Paragraph("<b>Le Maître d'Ouvrage</b><br/><br/>Société XYZ", body_style)
+                Paragraph(f"<b>Le Maître d'Ouvrage</b><br/><br/>{p_client}", body_style)
             ]
         ]
         sig_t = Table(sig_data, colWidths=[5.5*cm, 5.5*cm, 5.5*cm])
