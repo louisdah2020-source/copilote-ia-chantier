@@ -7,7 +7,7 @@ import sys
 import io
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from pydantic import BaseModel
 
@@ -28,6 +28,22 @@ from reports.excel_exporter import ExcelExporter
 
 
 app = FastAPI(title="Copilote IA Chantier BTP", version="1.0.0")
+
+
+@app.middleware("http")
+async def vercel_routing_middleware(request: Request, call_next):
+    """
+    Intercepte et normalise les chemins réécrits par Vercel Serverless.
+    Vercel transmet l'URL d'origine dans x-matched-path.
+    """
+    matched_path = request.headers.get("x-matched-path")
+    if matched_path:
+        # Si Vercel a réécrit la requête, rétablir le chemin d'origine demandé
+        request.scope["path"] = matched_path
+    elif request.scope.get("path") in ("/api/index", "/api/index/", "/api", "/api/"):
+        request.scope["path"] = "/"
+    return await call_next(request)
+
 
 # État global en mémoire pour les requêtes serveur
 DATA_CACHE = {}
@@ -81,6 +97,7 @@ class ChatRequest(BaseModel):
 
 
 @app.get("/api/kpi")
+@app.get("/kpi")
 def get_kpi_api():
     """Retourne les métriques calculées et les diagnostics du chantier."""
     state = get_current_data()
@@ -122,6 +139,7 @@ def get_kpi_api():
 
 
 @app.post("/api/chat")
+@app.post("/chat")
 def chat_api(req: ChatRequest):
     """Point d'accès du Copilote IA conversationnel."""
     state = get_current_data(req.filepath)
@@ -134,6 +152,7 @@ def chat_api(req: ChatRequest):
 
 
 @app.get("/api/export/pdf")
+@app.get("/export/pdf")
 def export_pdf():
     """Génère et télécharge le rapport PDF de direction."""
     state = get_current_data()
@@ -155,6 +174,7 @@ def export_pdf():
 
 
 @app.get("/api/export/excel")
+@app.get("/export/excel")
 def export_excel():
     """Génère et télécharge le classeur Excel consolidé."""
     state = get_current_data()
@@ -176,6 +196,9 @@ def export_excel():
 
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/api", response_class=HTMLResponse)
+@app.get("/api/index", response_class=HTMLResponse)
+@app.get("/api/index/", response_class=HTMLResponse)
 def index_html():
     """Sert l'application web monopage complète pour Vercel."""
     state = get_current_data()
